@@ -9,8 +9,6 @@ prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "system.md")
 with open(prompt_path, "r") as f:
     SYSTEM_PROMPT = f.read()
 
-# Initialize the LLM
-# This expects OPENAI_API_KEY to be set in the environment
 llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
 
 # Initialize memory

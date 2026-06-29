@@ -28,7 +28,6 @@ def web_search(query: str) -> str:
         formatted_results = f"Search Results for '{query}':\n\n"
         
         for idx, result in enumerate(web_results, 1):
-            # SearchResultWeb is always an object with .url and .title attributes
             url = result.url or ""
             title = result.title or url
             
