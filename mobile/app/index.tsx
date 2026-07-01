@@ -45,8 +45,8 @@ export default function LoginPage() {
         options: {
           redirectTo: redirectUrl,
           skipBrowserRedirect: true,
-          // Request Gmail modify scope alongside standard auth scopes
-          scopes: 'https://www.googleapis.com/auth/gmail.modify',
+          // Request Gmail modify + Drive readonly scopes alongside standard auth scopes
+          scopes: 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive.readonly',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',

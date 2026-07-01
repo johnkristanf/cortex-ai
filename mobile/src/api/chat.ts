@@ -61,4 +61,19 @@ export const chatApi = {
       }));
     });
   },
+
+  async subscribeToDrive(
+    user_id: string,
+    folder_id: string,
+    google_access_token: string,
+    thread_id: string = "default"
+  ) {
+    const response = await apiClient.post('/drive/subscribe', {
+      user_id,
+      folder_id,
+      google_access_token,
+      thread_id,
+    });
+    return response.data;
+  },
 };

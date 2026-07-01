@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Markdown from 'react-native-markdown-display';
 import { chatApi } from '../src/api/chat';
 import { useLocalSearchParams } from 'expo-router';
+import { supabase } from '../src/lib/supabase';
 
 interface Message {
   id: string;
@@ -20,6 +21,30 @@ export default function ChatPage() {
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const { google_token } = useLocalSearchParams<{ google_token?: string }>();
+
+  useEffect(() => {
+    if (!google_token) return;
+
+    const subscribeToDrive = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const folder_id = "14Dq8gmScifYG2G9t-ct5JFMxd3xZjdR4"
+
+        await chatApi.subscribeToDrive(
+          user.id,
+          folder_id, // Hardcoded for now, replace with actual
+          google_token,
+          'default'
+        );
+      } catch (error) {
+        console.error('Failed to subscribe to Drive:', error);
+      }
+    };
+
+    subscribeToDrive();
+  }, [google_token]);
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
