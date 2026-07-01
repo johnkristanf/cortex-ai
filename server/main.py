@@ -21,16 +21,43 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     thread_id: str = "default"
+    google_access_token: str | None = None
+
+from fastapi.responses import StreamingResponse
+import json
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
-    config = {"configurable": {"thread_id": request.thread_id}}
-    result = await agent_executor.ainvoke({"messages": [("user", request.message)]}, config)
+    config = {
+        "configurable": {
+            "thread_id": request.thread_id,
+            "google_access_token": request.google_access_token,
+        }
+    }
     
-    # The result contains the full state. The last message is the agent's response.
-    final_message = result["messages"][-1].content
-    
-    return {"response": final_message}
+    async def event_generator():
+        try:
+            async for chunk in agent_executor.astream(
+                {"messages": [("user", request.message)]}, 
+                config,
+                stream_mode="messages"
+            ):
+                token, metadata = chunk
+                # Only stream tokens from the assistant (not tools or human)
+                # Ensure the token has a content attribute and it's a string
+                if hasattr(token, "content") and isinstance(token.content, str) and token.content:
+                    # In LangGraph, message chunks have an 'id' and 'content'
+                    token_type = getattr(token, "type", "")
+                    if token_type in ("ai", "AIMessageChunk"):
+                        # Yield the content chunk as Server-Sent Events
+                        yield f"data: {json.dumps({'text': token.content})}\n\n"
+            
+            # Send a specific end event when done
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 # Start the server
 if __name__ == "__main__":

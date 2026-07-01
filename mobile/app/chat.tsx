@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Markdown from 'react-native-markdown-display';
 import { chatApi } from '../src/api/chat';
+import { useLocalSearchParams } from 'expo-router';
 
 interface Message {
   id: string;
@@ -18,6 +19,7 @@ export default function ChatPage() {
   ]);
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
+  const { google_token } = useLocalSearchParams<{ google_token?: string }>();
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
@@ -33,14 +35,29 @@ export default function ChatPage() {
     setInputText('');
 
     try {
-      const responseText = await chatApi.sendMessage(userText, 'default');
-      
-      const botMessage: Message = {
-        id: Date.now().toString(),
-        text: responseText,
+      // Create an empty bot message immediately
+      const botMessageId = Date.now().toString() + '-bot';
+      const initialBotMessage: Message = {
+        id: botMessageId,
+        text: '',
         isUser: false,
       };
-      setMessages(prev => [...prev, botMessage]);
+      setMessages(prev => [...prev, initialBotMessage]);
+
+      await chatApi.sendMessage(
+        userText, 
+        'default', 
+        google_token ?? null,
+        (textChunk) => {
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === botMessageId 
+                ? { ...msg, text: msg.text + textChunk }
+                : msg
+            )
+          );
+        }
+      );
     } catch (error) {
       const errorMessage: Message = {
         id: Date.now().toString(),

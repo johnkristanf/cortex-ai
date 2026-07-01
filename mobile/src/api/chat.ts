@@ -1,16 +1,64 @@
 import { apiClient } from './client';
 
 export const chatApi = {
-  async sendMessage(message: string, thread_id: string = "default"): Promise<string> {
-    try {
-      const response = await apiClient.post('/chat', {
+  sendMessage(
+    message: string, 
+    thread_id: string = "default", 
+    google_access_token: string | null = null,
+    onProgress?: (textChunk: string) => void
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      // Use XMLHttpRequest for streaming support in React Native
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${apiClient.defaults.baseURL}/chat`);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      
+      let fullResponse = '';
+      let processedLength = 0;
+
+      xhr.onprogress = (event) => {
+        const newData = xhr.responseText.substring(processedLength);
+        processedLength = xhr.responseText.length;
+        
+        // SSE responses look like "data: {...}\n\n"
+        const chunks = newData.split('\n\n');
+        for (const chunk of chunks) {
+          if (chunk.startsWith('data: ')) {
+            const dataStr = chunk.substring(6);
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.error) {
+                reject(new Error(data.error));
+              } else if (data.text) {
+                fullResponse += data.text;
+                if (onProgress) onProgress(data.text);
+              } else if (data.done) {
+                // Done event, do nothing here. The onload will resolve it.
+              }
+            } catch (e) {
+              // Not valid JSON or incomplete chunk, ignore
+            }
+          }
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(fullResponse);
+        } else {
+          reject(new Error(`Request failed with status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error occurred'));
+      };
+
+      xhr.send(JSON.stringify({
         message,
         thread_id,
-      });
-      return response.data.response;
-    } catch (error) {
-      console.error('Error calling chat API:', error);
-      throw error;
-    }
+        google_access_token,
+      }));
+    });
   },
 };
