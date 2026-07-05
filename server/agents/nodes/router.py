@@ -11,10 +11,7 @@ def route_model_output(state: AgentState):
     destinations = []
     has_standard_tools = False
     for tool_call in last_message.tool_calls:
-        if tool_call["name"] == "read_drive_file":
-            destinations.append("drive_reader")
-        else:
-            has_standard_tools = True
+        has_standard_tools = True
             
     if has_standard_tools:
         destinations.append("tools")

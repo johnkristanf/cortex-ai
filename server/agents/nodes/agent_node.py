@@ -9,7 +9,14 @@ prompt_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__fil
 with open(prompt_path, "r") as f:
     SYSTEM_PROMPT = f.read()
 
-llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
+llm = ChatOpenAI(
+    model="gpt-5.4-nano",
+    temperature=0,
+    metadata={
+        "ls_provider": "openai",
+        "ls_model_name": "gpt-5.4-nano"
+    }
+)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 def agent_node(state: AgentState):

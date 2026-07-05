@@ -23,27 +23,54 @@ export default function ChatPage() {
   const { google_token } = useLocalSearchParams<{ google_token?: string }>();
 
   useEffect(() => {
-    if (!google_token) return;
+    let unsubscribeTasks: (() => void) | undefined;
 
-    const subscribeToDrive = async () => {
+    const setupSubscriptions = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        const folder_id = "14Dq8gmScifYG2G9t-ct5JFMxd3xZjdR4"
+        if (google_token) {
+          try {
+            const folder_id = "14Dq8gmScifYG2G9t-ct5JFMxd3xZjdR4";
+            await chatApi.subscribeToDrive(
+              user.id,
+              folder_id, // Hardcoded for now, replace with actual
+              google_token,
+              'default'
+            );
+          } catch (driveError) {
+            console.error('Failed to setup Drive subscription:', driveError);
+          }
+        }
 
-        await chatApi.subscribeToDrive(
-          user.id,
-          folder_id, // Hardcoded for now, replace with actual
-          google_token,
-          'default'
-        );
+        // Always subscribe to scheduled tasks
+        try {
+          await chatApi.subscribeToScheduledTasks(user.id, 'default');
+
+          // Start listening to scheduled tasks notifications
+          unsubscribeTasks = chatApi.listenToScheduledTasks(user.id, (result) => {
+            const newBotMessage: Message = {
+              id: Date.now().toString() + '-scheduled',
+              text: result,
+              isUser: false,
+            };
+            setMessages(prev => [...prev, newBotMessage]);
+          });
+        } catch (tasksError) {
+          console.error('Failed to setup scheduled tasks:', tasksError);
+        }
+
       } catch (error) {
-        console.error('Failed to subscribe to Drive:', error);
+        console.error('Error during setupSubscriptions:', error);
       }
     };
 
-    subscribeToDrive();
+    setupSubscriptions();
+
+    return () => {
+      if (unsubscribeTasks) unsubscribeTasks();
+    };
   }, [google_token]);
 
   const sendMessage = async () => {

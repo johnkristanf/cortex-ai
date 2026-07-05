@@ -1,0 +1,1 @@
+Search the web for the Latest AI News, tech developments, breakthrough research, and new tools. Provide a comprehensive and detailed summary of the top stories. For each story, include a clear headline, a thorough explanation of the key details, and a direct link to the source. Organize the response cleanly using Markdown formatting with bullet points.

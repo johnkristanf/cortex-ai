@@ -5,12 +5,19 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 load_dotenv()
 
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+
 from agents import agent_executor
-from services.drive_events import drive_event_service
+from services.scheduled_tasks import scheduled_task_service
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import asyncio
+import langsmith as ls
 
 
 # ------------------------------------------------------------------
@@ -19,9 +26,9 @@ import asyncio
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await drive_event_service.start()
+    scheduled_task_service.start()
     yield
-    await drive_event_service.stop()
+    scheduled_task_service.stop()
 
 
 app = FastAPI(title="Cortex AI Agent Server", lifespan=lifespan)
@@ -46,10 +53,11 @@ class ChatRequest(BaseModel):
     google_access_token: str | None = None
 
 
-class DriveSubscriptionRequest(BaseModel):
+
+
+
+class ScheduledTaskSubscriptionRequest(BaseModel):
     user_id: str
-    folder_id: str
-    google_access_token: str
     thread_id: str = "default"
 
 
@@ -58,85 +66,100 @@ class DriveSubscriptionRequest(BaseModel):
 # ------------------------------------------------------------------
 
 @app.post("/chat")
+@ls.traceable(name="chat_endpoint")
 async def chat_endpoint(request: ChatRequest):
     config = {
         "configurable": {
             "thread_id": request.thread_id,
             "google_access_token": request.google_access_token,
-        }
+        },
+        # Bubble user metadata into every child LLM trace in LangSmith
+        "tags": ["chat", "cortex-ai"],
+        "metadata": {
+            "thread_id": request.thread_id,
+            "source": "chat_endpoint",
+            "ls_provider": "openai",
+            "ls_model_name": "gpt-5.4-nano",
+        },
     }
-    
+
+    logger = logging.getLogger("chat_endpoint")
+
     async def event_generator():
+        last_usage: dict | None = None
         try:
-            async for chunk in agent_executor.astream(
-                {"messages": [("user", request.message)]}, 
-                config,
-                stream_mode="messages"
+            with ls.tracing_context(
+                project_name="cortex-ai",
+                tags=["chat", "cortex-ai"],
+                metadata={
+                    "thread_id": request.thread_id,
+                    "source": "chat_endpoint",
+                    "ls_provider": "openai",
+                    "ls_model_name": "gpt-5.4-nano",
+                },
             ):
-                token, metadata = chunk
-                if hasattr(token, "content") and isinstance(token.content, str) and token.content:
-                    token_type = getattr(token, "type", "")
-                    if token_type in ("ai", "AIMessageChunk"):
-                        yield f"data: {json.dumps({'text': token.content})}\n\n"
-            
+                async for chunk in agent_executor.astream(
+                    {"messages": [("user", request.message)]}, 
+                    config,
+                    stream_mode="messages"
+                ):
+                    token, metadata = chunk
+                    if hasattr(token, "content") and isinstance(token.content, str) and token.content:
+                        token_type = getattr(token, "type", "")
+                        if token_type in ("ai", "AIMessageChunk"):
+                            yield f"data: {json.dumps({'text': token.content})}\n\n"
+
+                    # Capture usage_metadata from the final chunk (set by OpenAI at stream end)
+                    if getattr(token, "usage_metadata", None):
+                        last_usage = token.usage_metadata
+
+            # ── LLM cost logging ──────────────────────────────────────────
+            if last_usage:
+                logger.info(
+                    "[LLM usage] thread=%s input_tokens=%d output_tokens=%d total_tokens=%d",
+                    request.thread_id,
+                    last_usage.get("input_tokens", 0),
+                    last_usage.get("output_tokens", 0),
+                    last_usage.get("total_tokens", 0),
+                )
+                yield f"data: {json.dumps({'usage': last_usage})}\n\n"
+            # ─────────────────────────────────────────────────────────────
+
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@app.post("/drive/subscribe")
-async def drive_subscribe_endpoint(request: DriveSubscriptionRequest):
-    """
-    Register a Google Drive folder for event-driven monitoring via Push Notifications.
 
-    The service will register a webhook channel with the Drive API. Google will call
-    POST /drive/webhook whenever a file is created or modified in the user's Drive,
-    at which point the server fetches only the delta and invokes the agent to summarise
-    any new files in the watched folder.
 
-    The mobile client should call this endpoint once after login.
+@app.post("/scheduled/subscribe")
+@ls.traceable(name="scheduled_subscribe")
+async def scheduled_subscribe_endpoint(request: ScheduledTaskSubscriptionRequest):
     """
-    drive_event_service.register(
+    Subscribe a user to scheduled web search notifications.
+    """
+    scheduled_task_service.register(
         user_id=request.user_id,
-        folder_id=request.folder_id,
-        google_access_token=request.google_access_token,
         thread_id=request.thread_id,
     )
     return {
         "status": "subscribed",
         "user_id": request.user_id,
-        "folder_id": request.folder_id,
     }
 
 
-@app.post("/drive/webhook")
-async def drive_webhook_endpoint(request: Request):
+@app.get("/scheduled/notifications/{user_id}")
+async def scheduled_notifications_endpoint(user_id: str):
     """
-    Receives Google Drive Push Notifications.
-
-    Google POSTs here whenever anything changes in a subscribed Drive.
-    We return 200 immediately (required within 10 s) and dispatch processing
-    as a background task so the response is never delayed by agent work.
+    SSE stream that delivers scheduled search summaries to the mobile client.
     """
-    headers = dict(request.headers)
-    # handle_webhook schedules its own asyncio.create_task internally
-    await drive_event_service.handle_webhook(headers)
-    return {"status": "ok"}
-
-
-@app.get("/notifications/{user_id}")
-async def notifications_endpoint(user_id: str):
-    """
-    SSE stream that delivers proactive Drive summaries to the mobile client.
-    The client should open a persistent connection to this endpoint after login.
-    """
-    queue = drive_event_service.get_queue(user_id)
+    queue = scheduled_task_service.get_queue(user_id)
     if queue is None:
         raise HTTPException(
             status_code=404,
-            detail="No Drive subscription found for this user. Call POST /drive/subscribe first.",
+            detail="No scheduled task subscription found for this user. Call POST /scheduled/subscribe first.",
         )
 
     async def event_generator():

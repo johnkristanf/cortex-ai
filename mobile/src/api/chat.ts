@@ -76,4 +76,55 @@ export const chatApi = {
     });
     return response.data;
   },
+
+  async subscribeToScheduledTasks(
+    user_id: string,
+    thread_id: string = "default"
+  ) {
+    const response = await apiClient.post('/scheduled/subscribe', {
+      user_id,
+      thread_id,
+    });
+    return response.data;
+  },
+
+  listenToScheduledTasks(
+    user_id: string,
+    onMessage: (message: string) => void
+  ): () => void {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', `${apiClient.defaults.baseURL}/scheduled/notifications/${user_id}`);
+    xhr.setRequestHeader('Accept', 'text/event-stream');
+    
+    let processedLength = 0;
+
+    xhr.onprogress = () => {
+      const newData = xhr.responseText.substring(processedLength);
+      processedLength = xhr.responseText.length;
+      
+      const chunks = newData.split('\n\n');
+      for (const chunk of chunks) {
+        if (chunk.startsWith('data: ')) {
+          const dataStr = chunk.substring(6);
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.type === 'scheduled_task' && data.summary) {
+              onMessage(data.summary);
+            } else if (data.type === 'error' && data.message) {
+              onMessage(`Scheduled task error: ${data.message}`);
+            }
+          } catch (e) {
+            // Not valid JSON or incomplete chunk, ignore
+          }
+        }
+      }
+    };
+
+    xhr.send();
+
+    // Return an unsubscribe function
+    return () => {
+      xhr.abort();
+    };
+  },
 };

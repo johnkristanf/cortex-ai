@@ -4,8 +4,6 @@ from agents.state import AgentState
 from agents.nodes import (
     agent_node,
     execute_tools,
-    drive_reader,
-    summarizer,
     route_model_output
 )
 
@@ -17,8 +15,6 @@ workflow = StateGraph(AgentState)
 
 workflow.add_node("agent", agent_node)
 workflow.add_node("tools", execute_tools)
-workflow.add_node("drive_reader", drive_reader)
-workflow.add_node("summarizer", summarizer)
 
 workflow.add_edge(START, "agent")
 
@@ -26,12 +22,10 @@ workflow.add_edge(START, "agent")
 workflow.add_conditional_edges(
     "agent",
     route_model_output,
-    ["drive_reader", "tools", END]
+    ["tools", END]
 )
 
 # Edges back to agent
 workflow.add_edge("tools", "agent")
-workflow.add_edge("drive_reader", "summarizer")
-workflow.add_edge("summarizer", "agent")
 
 agent_executor = workflow.compile(checkpointer=memory)

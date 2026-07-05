@@ -19,7 +19,6 @@ def web_search(query: str) -> str:
         
         # Step 1: Search — returns a SearchData object with a .web attribute
         search_response = firecrawl.search(query, limit=3)
-        print("search_response: ", search_response)
         web_results = search_response.web or []
         
         if not web_results:
