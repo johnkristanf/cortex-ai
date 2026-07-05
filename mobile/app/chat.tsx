@@ -8,10 +8,19 @@ import { chatApi } from '../src/api/chat';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 
+interface MessageDraft {
+  to: string;
+  subject: string;
+  body: string;
+  gmail_thread_id?: string;
+  status?: 'pending' | 'sent' | 'discarded';
+}
+
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
+  drafts?: MessageDraft[];
 }
 
 export default function ChatPage() {
@@ -30,30 +39,18 @@ export default function ChatPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        if (google_token) {
-          try {
-            const folder_id = "14Dq8gmScifYG2G9t-ct5JFMxd3xZjdR4";
-            await chatApi.subscribeToDrive(
-              user.id,
-              folder_id, // Hardcoded for now, replace with actual
-              google_token,
-              'default'
-            );
-          } catch (driveError) {
-            console.error('Failed to setup Drive subscription:', driveError);
-          }
-        }
-
         // Always subscribe to scheduled tasks
+
         try {
-          await chatApi.subscribeToScheduledTasks(user.id, 'default');
+          await chatApi.subscribeToScheduledTasks(user.id, 'default', google_token ?? undefined);
 
           // Start listening to scheduled tasks notifications
-          unsubscribeTasks = chatApi.listenToScheduledTasks(user.id, (result) => {
+          unsubscribeTasks = chatApi.listenToScheduledTasks(user.id, (result, drafts) => {
             const newBotMessage: Message = {
               id: Date.now().toString() + '-scheduled',
               text: result,
               isUser: false,
+              drafts: drafts?.map(d => ({ ...d, status: 'pending' }))
             };
             setMessages(prev => [...prev, newBotMessage]);
           });
@@ -72,6 +69,40 @@ export default function ChatPage() {
       if (unsubscribeTasks) unsubscribeTasks();
     };
   }, [google_token]);
+
+  const handleSendDraft = async (messageId: string, draftIndex: number, draft: MessageDraft) => {
+    if (!google_token) {
+      alert("No Google Token available to send email.");
+      return;
+    }
+    
+    try {
+      await chatApi.sendEmailDraft(google_token, draft.to, draft.subject, draft.body, draft.gmail_thread_id);
+      
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === messageId && msg.drafts) {
+          const newDrafts = [...msg.drafts];
+          newDrafts[draftIndex] = { ...newDrafts[draftIndex], status: 'sent' };
+          return { ...msg, drafts: newDrafts };
+        }
+        return msg;
+      }));
+    } catch (error) {
+      console.error("Failed to send draft:", error);
+      alert("Failed to send email. Please try again.");
+    }
+  };
+
+  const handleDiscardDraft = (messageId: string, draftIndex: number) => {
+    setMessages(prev => prev.map(msg => {
+      if (msg.id === messageId && msg.drafts) {
+        const newDrafts = [...msg.drafts];
+        newDrafts[draftIndex] = { ...newDrafts[draftIndex], status: 'discarded' };
+        return { ...msg, drafts: newDrafts };
+      }
+      return msg;
+    }));
+  };
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
@@ -135,9 +166,44 @@ export default function ChatPage() {
               {item.text}
             </Text>
           ) : (
-            <Markdown style={markdownStyles}>
-              {item.text}
-            </Markdown>
+            <>
+              <Markdown style={markdownStyles}>
+                {item.text}
+              </Markdown>
+              {item.drafts && item.drafts.length > 0 && (
+                <View style={styles.draftsContainer}>
+                  {item.drafts.map((draft, index) => (
+                    <View key={index} style={styles.draftCard}>
+                      <Text style={styles.draftHeader}>Draft to: {draft.to}</Text>
+                      <Text style={styles.draftSubject}>Subject: {draft.subject}</Text>
+                      <Text style={styles.draftBody} numberOfLines={3}>{draft.body}</Text>
+                      {draft.status === 'pending' && (
+                        <View style={styles.draftActions}>
+                          <TouchableOpacity 
+                            style={[styles.draftButton, styles.sendDraftButton]} 
+                            onPress={() => handleSendDraft(item.id, index, draft)}
+                          >
+                            <Text style={styles.sendDraftText}>Send</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.draftButton, styles.discardDraftButton]} 
+                            onPress={() => handleDiscardDraft(item.id, index)}
+                          >
+                            <Text style={styles.discardDraftText}>Discard</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      {draft.status === 'sent' && (
+                        <Text style={styles.draftStatusSent}>Sent successfully ✓</Text>
+                      )}
+                      {draft.status === 'discarded' && (
+                        <Text style={styles.draftStatusDiscarded}>Discarded</Text>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -322,6 +388,72 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingLeft: 2, 
+  },
+  draftsContainer: {
+    marginTop: 12,
+  },
+  draftCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  draftHeader: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  draftSubject: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#334155',
+    marginBottom: 8,
+  },
+  draftBody: {
+    fontSize: 14,
+    color: '#475569',
+    marginBottom: 12,
+  },
+  draftActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  draftButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  sendDraftButton: {
+    backgroundColor: '#3B82F6',
+  },
+  discardDraftButton: {
+    backgroundColor: '#EF4444',
+  },
+  sendDraftText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  discardDraftText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  draftStatusSent: {
+    color: '#10B981',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  draftStatusDiscarded: {
+    color: '#94A3B8',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'right',
   },
 });
 

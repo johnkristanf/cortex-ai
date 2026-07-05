@@ -23,15 +23,14 @@ def _get_agent_executor():
     return agent_executor
 
 
-prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts", "ai_news_search.md")
-with open(prompt_path, "r") as f:
-    SCHEDULED_TASK_PROMPT = f.read().strip()
+
 
 
 @dataclass
 class ScheduledTaskSubscriptionEntry:
     user_id: str
     thread_id: str
+    google_access_token: str | None = None
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
 
 
@@ -44,7 +43,7 @@ class ScheduledTaskService:
         self._subscriptions: Dict[str, ScheduledTaskSubscriptionEntry] = {}
         self._scheduler = AsyncIOScheduler()
 
-    def register(self, user_id: str, thread_id: str) -> asyncio.Queue:
+    def register(self, user_id: str, thread_id: str, google_access_token: str | None = None) -> asyncio.Queue:
         """
         Subscribe a user to scheduled task notifications.
         Returns the asyncio.Queue that will receive the summaries.
@@ -52,10 +51,13 @@ class ScheduledTaskService:
         if user_id not in self._subscriptions:
             self._subscriptions[user_id] = ScheduledTaskSubscriptionEntry(
                 user_id=user_id,
-                thread_id=thread_id
+                thread_id=thread_id,
+                google_access_token=google_access_token,
             )
         else:
             self._subscriptions[user_id].thread_id = thread_id
+            if google_access_token:
+                self._subscriptions[user_id].google_access_token = google_access_token
             
         logger.info("Registered scheduled task subscription for user=%s", user_id)
         return self._subscriptions[user_id].queue
@@ -111,11 +113,12 @@ class ScheduledTaskService:
         """Invoke the agent to perform the scheduled task."""
         print(f"Invoking agent task for user={entry.user_id} on thread={entry.thread_id}...")
         agent_executor = _get_agent_executor()
-        prompt = SCHEDULED_TASK_PROMPT
+        prompt = "Check my email and draft replies for each unread message."
         
         config = {
             "configurable": {
                 "thread_id": entry.thread_id,
+                "google_access_token": entry.google_access_token,
             },
             # Bubble user metadata into every child LLM trace in LangSmith
             "tags": ["scheduled_task", "cortex-ai"],
@@ -148,6 +151,10 @@ class ScheduledTaskService:
             last_msg = result["messages"][-1]
             summary = last_msg.content
 
+            # ── Read draft proposals directly from state ───────────────────
+            drafts: list[dict] = result.get("drafts_proposed", [])
+            # ──────────────────────────────────────────────────────────────
+
             # ── LLM cost logging ───────────────────────────────────────────
             usage = getattr(last_msg, "usage_metadata", None)
             if usage:
@@ -163,8 +170,9 @@ class ScheduledTaskService:
 
             await entry.queue.put({
                 "type": "scheduled_task",
-                "task": "Latest AI News",
+                "task": "Email Check & Draft Replies",
                 "summary": summary,
+                "drafts": drafts,
             })
             logger.info("Scheduled task queued for user=%s", entry.user_id)
             print(f"Scheduled task successfully queued for user={entry.user_id}")
@@ -174,7 +182,7 @@ class ScheduledTaskService:
             print(f"Scheduled task FAILED for user={entry.user_id}: {exc}")
             await entry.queue.put({
                 "type": "error",
-                "task": "Latest AI News",
+                "task": "Email Check & Draft Replies",
                 "message": str(exc),
             })
 

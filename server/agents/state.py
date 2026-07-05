@@ -15,3 +15,8 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     file_content: str | None
     file_summary: str | None
+    
+    # Email processing state
+    unread_emails: list[dict]
+    current_email_index: int
+    drafts_proposed: list[dict]

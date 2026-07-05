@@ -45,8 +45,8 @@ export default function LoginPage() {
         options: {
           redirectTo: redirectUrl,
           skipBrowserRedirect: true,
-          // Request Gmail modify + Drive readonly scopes alongside standard auth scopes
-          scopes: 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive.readonly',
+          // Request Gmail modify scope alongside standard auth scopes
+          scopes: 'https://www.googleapis.com/auth/gmail.modify',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -78,7 +78,6 @@ export default function LoginPage() {
               // provider_token is in the redirect URL hash — Supabase does NOT
               // persist it after setSession(), so read it directly from the params.
               const providerToken = paramsObj.provider_token ?? '';
-              
               router.replace({ pathname: '/chat', params: { google_token: providerToken } });
             }
           }

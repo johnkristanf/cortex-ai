@@ -62,35 +62,22 @@ export const chatApi = {
     });
   },
 
-  async subscribeToDrive(
-    user_id: string,
-    folder_id: string,
-    google_access_token: string,
-    thread_id: string = "default"
-  ) {
-    const response = await apiClient.post('/drive/subscribe', {
-      user_id,
-      folder_id,
-      google_access_token,
-      thread_id,
-    });
-    return response.data;
-  },
-
   async subscribeToScheduledTasks(
     user_id: string,
-    thread_id: string = "default"
+    thread_id: string = "default",
+    google_access_token?: string
   ) {
     const response = await apiClient.post('/scheduled/subscribe', {
       user_id,
       thread_id,
+      google_access_token: google_access_token ?? null,
     });
     return response.data;
   },
 
   listenToScheduledTasks(
     user_id: string,
-    onMessage: (message: string) => void
+    onMessage: (message: string, drafts?: any[]) => void
   ): () => void {
     const xhr = new XMLHttpRequest();
     xhr.open('GET', `${apiClient.defaults.baseURL}/scheduled/notifications/${user_id}`);
@@ -109,7 +96,7 @@ export const chatApi = {
           try {
             const data = JSON.parse(dataStr);
             if (data.type === 'scheduled_task' && data.summary) {
-              onMessage(data.summary);
+              onMessage(data.summary, data.drafts);
             } else if (data.type === 'error' && data.message) {
               onMessage(`Scheduled task error: ${data.message}`);
             }
@@ -126,5 +113,22 @@ export const chatApi = {
     return () => {
       xhr.abort();
     };
+  },
+
+  async sendEmailDraft(
+    google_access_token: string,
+    to: string,
+    subject: string,
+    body: string,
+    gmail_thread_id?: string
+  ) {
+    const response = await apiClient.post('/email/send', {
+      google_access_token,
+      to,
+      subject,
+      body,
+      gmail_thread_id,
+    });
+    return response.data;
   },
 };

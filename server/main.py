@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from types.chat import ChatRequest
+from types.scheduled_tasks import ScheduledTaskSubscriptionRequest
+from types.email import SendEmailRequest
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -13,6 +15,7 @@ logging.basicConfig(
 
 from agents import agent_executor
 from services.scheduled_tasks import scheduled_task_service
+from services.gmail_send import send_gmail_message
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 import json
@@ -44,21 +47,19 @@ app.add_middleware(
 
 
 # ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def sse_message(data: dict) -> str:
+    """Formats a dictionary as a Server-Sent Event string."""
+    return f"data: {json.dumps(data)}\n\n"
+
+
+# ------------------------------------------------------------------
 # Request models
 # ------------------------------------------------------------------
 
-class ChatRequest(BaseModel):
-    message: str
-    thread_id: str = "default"
-    google_access_token: str | None = None
-
-
-
-
-
-class ScheduledTaskSubscriptionRequest(BaseModel):
-    user_id: str
-    thread_id: str = "default"
+# Request models have been extracted to the `types/` directory
 
 
 # ------------------------------------------------------------------
@@ -107,7 +108,7 @@ async def chat_endpoint(request: ChatRequest):
                     if hasattr(token, "content") and isinstance(token.content, str) and token.content:
                         token_type = getattr(token, "type", "")
                         if token_type in ("ai", "AIMessageChunk"):
-                            yield f"data: {json.dumps({'text': token.content})}\n\n"
+                            yield sse_message({'text': token.content})
 
                     # Capture usage_metadata from the final chunk (set by OpenAI at stream end)
                     if getattr(token, "usage_metadata", None):
@@ -122,17 +123,30 @@ async def chat_endpoint(request: ChatRequest):
                     last_usage.get("output_tokens", 0),
                     last_usage.get("total_tokens", 0),
                 )
-                yield f"data: {json.dumps({'usage': last_usage})}\n\n"
+                yield sse_message({'usage': last_usage})
             # ─────────────────────────────────────────────────────────────
 
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            yield sse_message({'done': True})
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield sse_message({'error': str(e)})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-
-
+@app.post("/email/send")
+@ls.traceable(name="send_email")
+async def send_email_endpoint(request: SendEmailRequest):
+    try:
+        result = send_gmail_message(
+            google_access_token=request.google_access_token,
+            to=request.to,
+            subject=request.subject,
+            body=request.body,
+            gmail_thread_id=request.gmail_thread_id,
+        )
+        return result
+    except Exception as e:
+        # logger.error(f"Error sending email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/scheduled/subscribe")
 @ls.traceable(name="scheduled_subscribe")
@@ -143,6 +157,7 @@ async def scheduled_subscribe_endpoint(request: ScheduledTaskSubscriptionRequest
     scheduled_task_service.register(
         user_id=request.user_id,
         thread_id=request.thread_id,
+        google_access_token=request.google_access_token,
     )
     return {
         "status": "subscribed",
@@ -164,16 +179,16 @@ async def scheduled_notifications_endpoint(user_id: str):
 
     async def event_generator():
         # Send an initial connection event
-        yield f"data: {json.dumps({'type': 'connected', 'user_id': user_id})}\n\n"
+        yield sse_message({'type': 'connected', 'user_id': user_id})
         
         while True:
             try:
                 # Wait up to 20s for a notification, then send a heartbeat
                 notification = await asyncio.wait_for(queue.get(), timeout=20.0)
-                yield f"data: {json.dumps(notification)}\n\n"
+                yield sse_message(notification)
             except asyncio.TimeoutError:
                 # Heartbeat keeps the connection alive
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                yield sse_message({'type': 'heartbeat'})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

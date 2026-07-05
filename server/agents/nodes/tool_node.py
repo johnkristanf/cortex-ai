@@ -1,11 +1,10 @@
 from langchain_core.messages import ToolMessage
 from agents.state import AgentState
 from tools.weather import get_weather
-from tools.email import check_email
 from tools.search import web_search
 
 # Standard tools handled by the standard executor
-STANDARD_TOOLS = [get_weather, check_email, web_search]
+STANDARD_TOOLS = [get_weather, web_search]
 
 def execute_tools(state: AgentState, config):
     last_message = state["messages"][-1]
