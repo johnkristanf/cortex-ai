@@ -1,3 +1,4 @@
+from agents.nodes.router import should_continue_writing
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from agents.state import AgentState
@@ -7,7 +8,6 @@ from agents.nodes import (
     route_model_output,
     read_email_node,
     write_reply_node,
-    should_continue_writing,
 )
 
 # Initialize memory

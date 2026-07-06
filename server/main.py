@@ -1,17 +1,20 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from types.chat import ChatRequest
-from types.scheduled_tasks import ScheduledTaskSubscriptionRequest
-from types.email import SendEmailRequest
-from dotenv import load_dotenv
-load_dotenv()
-
 import logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
+
+
+from utils import sse_message
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from schemas.chat import ChatRequest
+from schemas.scheduled_tasks import ScheduledTaskSubscriptionRequest
+from schemas.email import SendEmailRequest
+from dotenv import load_dotenv
+load_dotenv()
+
 
 from agents import agent_executor
 from services.scheduled_tasks import scheduled_task_service
@@ -46,26 +49,6 @@ app.add_middleware(
 )
 
 
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-def sse_message(data: dict) -> str:
-    """Formats a dictionary as a Server-Sent Event string."""
-    return f"data: {json.dumps(data)}\n\n"
-
-
-# ------------------------------------------------------------------
-# Request models
-# ------------------------------------------------------------------
-
-# Request models have been extracted to the `types/` directory
-
-
-# ------------------------------------------------------------------
-# Endpoints
-# ------------------------------------------------------------------
-
 @app.post("/chat")
 @ls.traceable(name="chat_endpoint")
 async def chat_endpoint(request: ChatRequest):
@@ -83,8 +66,6 @@ async def chat_endpoint(request: ChatRequest):
             "ls_model_name": "gpt-5.4-nano",
         },
     }
-
-    logger = logging.getLogger("chat_endpoint")
 
     async def event_generator():
         last_usage: dict | None = None
@@ -113,18 +94,6 @@ async def chat_endpoint(request: ChatRequest):
                     # Capture usage_metadata from the final chunk (set by OpenAI at stream end)
                     if getattr(token, "usage_metadata", None):
                         last_usage = token.usage_metadata
-
-            # ── LLM cost logging ──────────────────────────────────────────
-            if last_usage:
-                logger.info(
-                    "[LLM usage] thread=%s input_tokens=%d output_tokens=%d total_tokens=%d",
-                    request.thread_id,
-                    last_usage.get("input_tokens", 0),
-                    last_usage.get("output_tokens", 0),
-                    last_usage.get("total_tokens", 0),
-                )
-                yield sse_message({'usage': last_usage})
-            # ─────────────────────────────────────────────────────────────
 
             yield sse_message({'done': True})
         except Exception as e:

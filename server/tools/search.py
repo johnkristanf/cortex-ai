@@ -37,6 +37,7 @@ def web_search(query: str) -> str:
             try:
                 scraped = firecrawl.scrape(url, formats=["markdown"])
                 content = scraped.markdown if hasattr(scraped, "markdown") else scraped.get("markdown", "")
+                print(f"content: { content}")
                 
                 content_preview = content[:1500].strip() if content else "No content retrieved."
             except Exception as scrape_err:
@@ -48,8 +49,11 @@ def web_search(query: str) -> str:
                 f"   Content:\n{content_preview}\n\n"
                 f"{'—' * 40}\n\n"
             )
+
         
         return formatted_results
         
     except Exception as e:
         return f"An error occurred while searching the web: {str(e)}"
+
+

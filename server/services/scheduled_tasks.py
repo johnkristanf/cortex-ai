@@ -10,7 +10,9 @@ import logging
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import langsmith as ls
@@ -71,14 +73,39 @@ class ScheduledTaskService:
         """Start the APScheduler."""
         logger.info("Starting ScheduledTaskService scheduler...")
         print("Starting ScheduledTaskService scheduler...")
-        # Add a job that runs every minute
+        
+        # AI News Web Search - every minute (for testing; set to cron 8:30 AM PH for production)
         self._scheduler.add_job(
             self._run_scheduled_tasks,
             'cron',
-            minute='*',  # every minute
-            id='scheduled_agent_tasks',
-            replace_existing=True
+            minute='*',
+            id='scheduled_ai_news_tasks',
+            replace_existing=True,
+            args=["ai_news"]
         )
+
+        # Product Hunt Trending - every minute (for testing; set to cron schedule for production)
+        self._scheduler.add_job(
+            self._run_scheduled_tasks,
+            'cron',
+            minute='*',
+            id='scheduled_product_hunt_tasks',
+            replace_existing=True,
+            args=["product_hunt"]
+        )
+        
+        # Email Check & Draft Replies - 9:00 AM PH time
+        self._scheduler.add_job(
+            self._run_scheduled_tasks,
+            'cron',
+            hour=9,
+            minute=0,
+            timezone='Asia/Manila',
+            id='scheduled_email_tasks',
+            replace_existing=True,
+            args=["email"]
+        )
+        
         self._scheduler.start()
         print("ScheduledTaskService scheduler started successfully!")
 
@@ -89,31 +116,63 @@ class ScheduledTaskService:
         self._scheduler.shutdown()
 
     @ls.traceable(name="run_scheduled_tasks")
-    async def _run_scheduled_tasks(self) -> None:
+    async def _run_scheduled_tasks(self, task_type: str = "email") -> None:
         """
         Scheduled job that triggers the tasks for all subscribed users.
         """
-        print("APScheduler cron triggered: _run_scheduled_tasks")
         if not self._subscriptions:
-            print("No active subscriptions for scheduled tasks. Skipping.")
+            print(f"No active subscriptions for scheduled tasks ({task_type}). Skipping.")
             return
             
-        logger.info("Running scheduled tasks for %d users...", len(self._subscriptions))
-        print(f"Running scheduled tasks for {len(self._subscriptions)} users...")
+        logger.info("Running scheduled %s tasks for %d users...", task_type, len(self._subscriptions))
         
         # Run agent invocations concurrently
         tasks = []
         for entry in self._subscriptions.values():
-            tasks.append(self._invoke_agent_task(entry))
+            tasks.append(self._invoke_agent_task(entry, task_type))
             
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    def _get_task_details(self, task_type: str) -> tuple[str, str]:
+        """Return the prompt and task title for a given task type."""
+        if task_type == "ai_news":
+            prompt_subpath = os.path.join("search", "ai_news.md")
+            task_title = "Daily AI News Summary"
+            fallback_prompt = "Search the web for the latest AI news, tech developments, and new tools. Provide a detailed summary with headlines and source links."
+        elif task_type == "product_hunt":
+            prompt_subpath = os.path.join("search", "product_hunt.md")
+            task_title = "Product Hunt Trending"
+            fallback_prompt = "Search the web for the top 3 trending products on Product Hunt for today (daily), this week (weekly), and this month (monthly). Include product names, descriptions, and links."
+        else:
+            prompt_subpath = "email_check.md"
+            task_title = "Email Check & Draft Replies"
+            fallback_prompt = "Check my email and draft replies for each unread message."
+
+        prompt_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "prompts",
+            prompt_subpath
+        )
+        try:
+            with open(prompt_path, "r") as f:
+                prompt = f.read()
+        except FileNotFoundError:
+            prompt = fallback_prompt
+
+        # Inject the current US Eastern date so the model has an unambiguous
+        # anchor for "today" regardless of where the server is running.
+        us_eastern_date = datetime.now(ZoneInfo("America/New_York")).strftime("%B %d, %Y")
+        prompt = prompt.replace("{date_us_eastern}", us_eastern_date)
+
+        return prompt, task_title
+
     @ls.traceable(name="invoke_scheduled_agent_task")
-    async def _invoke_agent_task(self, entry: ScheduledTaskSubscriptionEntry) -> None:
+    async def _invoke_agent_task(self, entry: ScheduledTaskSubscriptionEntry, task_type: str) -> None:
         """Invoke the agent to perform the scheduled task."""
-        print(f"Invoking agent task for user={entry.user_id} on thread={entry.thread_id}...")
+        print(f"Invoking agent task ({task_type}) for user={entry.user_id} on thread={entry.thread_id}...")
         agent_executor = _get_agent_executor()
-        prompt = "Check my email and draft replies for each unread message."
+        
+        prompt, task_title = self._get_task_details(task_type)
         
         config = {
             "configurable": {
@@ -170,19 +229,19 @@ class ScheduledTaskService:
 
             await entry.queue.put({
                 "type": "scheduled_task",
-                "task": "Email Check & Draft Replies",
+                "task": task_title,
                 "summary": summary,
                 "drafts": drafts,
             })
-            logger.info("Scheduled task queued for user=%s", entry.user_id)
-            print(f"Scheduled task successfully queued for user={entry.user_id}")
+            logger.info("Scheduled task (%s) queued for user=%s", task_type, entry.user_id)
+            print(f"Scheduled task ({task_type}) successfully queued for user={entry.user_id}")
 
         except Exception as exc:
-            logger.error("Scheduled task failed for user=%s: %s", entry.user_id, exc)
-            print(f"Scheduled task FAILED for user={entry.user_id}: {exc}")
+            logger.error("Scheduled task (%s) failed for user=%s: %s", task_type, entry.user_id, exc)
+            print(f"Scheduled task ({task_type}) FAILED for user={entry.user_id}: {exc}")
             await entry.queue.put({
                 "type": "error",
-                "task": "Email Check & Draft Replies",
+                "task": task_title,
                 "message": str(exc),
             })
 

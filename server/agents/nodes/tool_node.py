@@ -1,15 +1,11 @@
 from langchain_core.messages import ToolMessage
 from agents.state import AgentState
-from tools.weather import get_weather
-from tools.search import web_search
-
-# Standard tools handled by the standard executor
-STANDARD_TOOLS = [get_weather, web_search]
+from tools import TOOLS
 
 def execute_tools(state: AgentState, config):
     last_message = state["messages"][-1]
     outputs = []
-    tool_map = {tool.name: tool for tool in STANDARD_TOOLS}
+    tool_map = {tool.name: tool for tool in TOOLS}
     
     for tool_call in last_message.tool_calls:
         if tool_call["name"] in tool_map:
