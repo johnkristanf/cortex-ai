@@ -39,7 +39,13 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Cortex AI uses your location to find nearby businesses."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -7,6 +7,7 @@ import Markdown from 'react-native-markdown-display';
 import { chatApi } from '../src/api/chat';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
+import { getCachedCoords, refreshLocation } from '../src/lib/location';
 
 interface MessageDraft {
   to: string;
@@ -30,6 +31,10 @@ export default function ChatPage() {
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const { google_token } = useLocalSearchParams<{ google_token?: string }>();
+
+  useEffect(() => {
+    refreshLocation();
+  }, []);
 
   useEffect(() => {
     let unsubscribeTasks: (() => void) | undefined;
@@ -127,6 +132,9 @@ export default function ChatPage() {
       };
       setMessages(prev => [...prev, initialBotMessage]);
 
+      const coords = getCachedCoords();
+      refreshLocation();
+
       await chatApi.sendMessage(
         userText, 
         'default', 
@@ -139,7 +147,8 @@ export default function ChatPage() {
                 : msg
             )
           );
-        }
+        },
+        coords,
       );
     } catch (error) {
       const errorMessage: Message = {

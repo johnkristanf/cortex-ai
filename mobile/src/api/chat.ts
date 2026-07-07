@@ -5,7 +5,8 @@ export const chatApi = {
     message: string, 
     thread_id: string = "default", 
     google_access_token: string | null = null,
-    onProgress?: (textChunk: string) => void
+    onProgress?: (textChunk: string) => void,
+    coords?: { latitude: number; longitude: number } | null,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       // Use XMLHttpRequest for streaming support in React Native
@@ -54,11 +55,17 @@ export const chatApi = {
         reject(new Error('Network error occurred'));
       };
 
-      xhr.send(JSON.stringify({
+      const body: Record<string, unknown> = {
         message,
         thread_id,
         google_access_token,
-      }));
+      };
+      if (coords) {
+        body.latitude = coords.latitude;
+        body.longitude = coords.longitude;
+      }
+
+      xhr.send(JSON.stringify(body));
     });
   },
 

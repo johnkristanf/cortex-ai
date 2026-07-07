@@ -45,8 +45,8 @@ export default function LoginPage() {
         options: {
           redirectTo: redirectUrl,
           skipBrowserRedirect: true,
-          // Request Gmail modify scope alongside standard auth scopes
-          scopes: 'https://www.googleapis.com/auth/gmail.modify',
+          // Request Gmail modify and Google Cloud Platform (Places API) scopes
+          scopes: 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/cloud-platform',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',

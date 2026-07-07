@@ -32,7 +32,7 @@ import langsmith as ls
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduled_task_service.start()
+    # scheduled_task_service.start()
     yield
     scheduled_task_service.stop()
 
@@ -56,6 +56,8 @@ async def chat_endpoint(request: ChatRequest):
         "configurable": {
             "thread_id": request.thread_id,
             "google_access_token": request.google_access_token,
+            "latitude": request.latitude,
+            "longitude": request.longitude,
         },
         # Bubble user metadata into every child LLM trace in LangSmith
         "tags": ["chat", "cortex-ai"],
@@ -66,6 +68,7 @@ async def chat_endpoint(request: ChatRequest):
             "ls_model_name": "gpt-5.4-nano",
         },
     }
+    print(f"request: {request}")
 
     async def event_generator():
         last_usage: dict | None = None
