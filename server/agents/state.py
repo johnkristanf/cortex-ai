@@ -1,3 +1,4 @@
+import operator
 from typing import Annotated, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -17,6 +18,4 @@ class AgentState(TypedDict):
     file_summary: str | None
     
     # Email processing state
-    unread_emails: list[dict]
-    current_email_index: int
-    drafts_proposed: list[dict]
+    drafts_proposed: Annotated[list[dict], operator.add]

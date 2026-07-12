@@ -47,6 +47,7 @@ class ScheduledTaskService:
         self._scheduler = AsyncIOScheduler()
         self._dynamic_job_meta: Dict[str, dict] = {}
         self._telegram_service = telegram_service
+        self._queues: Dict[str, asyncio.Queue] = {}
 
     def start(self) -> None:
         """Start the APScheduler."""
@@ -62,6 +63,19 @@ class ScheduledTaskService:
             self._scheduler.shutdown()
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    # SSE Queue Management for Mobile App
+    # ------------------------------------------------------------------
+
+    def get_queue(self, user_id: str) -> asyncio.Queue:
+        if user_id not in self._queues:
+            self._queues[user_id] = asyncio.Queue()
+        return self._queues[user_id]
+
+    def remove_queue(self, user_id: str) -> None:
+        if user_id in self._queues:
+            del self._queues[user_id]
 
     # ------------------------------------------------------------------
     # Dynamic job management (called by the schedule_task LangChain tool)
@@ -234,8 +248,6 @@ class ScheduledTaskService:
         except FileNotFoundError:
             prompt = fallback_prompt
 
-        # Inject the current US Eastern date so the model has an unambiguous
-        # anchor for "today" regardless of where the server is running.
         us_eastern_date = datetime.now(ZoneInfo("America/New_York")).strftime("%B %d, %Y")
         prompt = prompt.replace("{date_us_eastern}", us_eastern_date)
 
@@ -313,6 +325,18 @@ class ScheduledTaskService:
                     logger.info("Sent scheduled task result via Telegram to %s", chat_id)
                 except Exception as tg_err:
                     logger.error("Failed to send telegram notification: %s", tg_err)
+            else:
+                # Send to mobile app via SSE queue
+                if entry.user_id in self._queues:
+                    payload = {
+                        "type": "scheduled_task",
+                        "summary": f"🔔 **{task_title}**\n\n{summary}",
+                        "drafts": drafts
+                    }
+                    await self._queues[entry.user_id].put(payload)
+                    logger.info("Queued scheduled task result for mobile user %s", entry.user_id)
+                else:
+                    logger.warning("User %s has no active SSE connection; output dropped.", entry.user_id)
                     
             logger.info("Scheduled task (%s) processed for user=%s", task_type, entry.user_id)
             print(f"Scheduled task ({task_type}) successfully processed for user={entry.user_id}")
