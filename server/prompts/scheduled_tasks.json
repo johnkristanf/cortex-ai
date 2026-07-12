@@ -1,0 +1,20 @@
+{
+  "ai_news": {
+    "title": "Daily AI News Summary",
+    "prompt_file": "search/ai_news.md",
+    "fallback_prompt": "Search the web for the latest AI news, tech developments, breakthrough research, and new tools released today. Provide a comprehensive and detailed summary of the top stories. For each story, include a clear headline, a thorough explanation of the key details, and a direct link to the source. Organize the response cleanly using Markdown formatting with bullet points and bold headlines.",
+    "tool_description": "Use 'ai_news' for AI/tech news searches."
+  },
+  "product_hunt": {
+    "title": "Product Hunt Trending",
+    "prompt_file": "search/product_hunt.md",
+    "fallback_prompt": "Search the web for the top 3 trending products on Product Hunt for today (daily), this week (weekly), and this month (monthly). Include product names, descriptions, and links.",
+    "tool_description": "Use 'product_hunt' for Product Hunt trending searches."
+  },
+  "email": {
+    "title": "Email Check & Draft Replies",
+    "prompt_file": "email_check.md",
+    "fallback_prompt": "Check my email and draft replies for each unread message.",
+    "tool_description": "Use 'email' for email reading/summarizing tasks."
+  }
+}

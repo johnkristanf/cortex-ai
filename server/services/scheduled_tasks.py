@@ -18,6 +18,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import langsmith as ls
 
 from services.telegram import TelegramService, telegram_service
+from services.task_registry import task_registry
+from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,6 @@ class ScheduledTaskService:
         Returns:
             The unique job_id string.
         """
-        from apscheduler.triggers.cron import CronTrigger
 
         # Parse the 5-field cron string
         parts = cron_expression.strip().split()
@@ -215,43 +216,7 @@ class ScheduledTaskService:
             
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _get_task_details(self, task_type: str, custom_prompt: str = "") -> tuple[str, str]:
-        """Return the prompt and task title for a given task type."""
-        if task_type == "ai_news":
-            prompt_subpath = os.path.join("search", "ai_news.md")
-            task_title = "Daily AI News Summary"
-            fallback_prompt = "Search the web for the latest AI news, tech developments, and new tools. Provide a detailed summary with headlines and source links."
-        elif task_type == "product_hunt":
-            prompt_subpath = os.path.join("search", "product_hunt.md")
-            task_title = "Product Hunt Trending"
-            fallback_prompt = "Search the web for the top 3 trending products on Product Hunt for today (daily), this week (weekly), and this month (monthly). Include product names, descriptions, and links."
-        elif task_type == "email":
-            prompt_subpath = "email_check.md"
-            task_title = "Email Check & Draft Replies"
-            fallback_prompt = "Check my email and draft replies for each unread message."
-        else:
-            # Free-form task defined by the user via natural language
-            prompt = custom_prompt or "Search the web and provide a detailed summary."
-            task_title = "Custom Scheduled Task"
-            us_eastern_date = datetime.now(ZoneInfo("America/New_York")).strftime("%B %d, %Y")
-            prompt = prompt.replace("{date_us_eastern}", us_eastern_date)
-            return prompt, task_title
-
-        prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "prompts",
-            prompt_subpath
-        )
-        try:
-            with open(prompt_path, "r") as f:
-                prompt = f.read()
-        except FileNotFoundError:
-            prompt = fallback_prompt
-
-        us_eastern_date = datetime.now(ZoneInfo("America/New_York")).strftime("%B %d, %Y")
-        prompt = prompt.replace("{date_us_eastern}", us_eastern_date)
-
-        return prompt, task_title
+    # The _get_task_details logic was moved to task_registry.py
 
     @ls.traceable(name="invoke_scheduled_agent_task")
     async def _invoke_agent_task(self, entry: ScheduledTaskSubscriptionEntry, task_type: str, custom_prompt: str = "") -> None:
@@ -259,7 +224,7 @@ class ScheduledTaskService:
         print(f"Invoking agent task ({task_type}) for user={entry.user_id} on thread={entry.thread_id}...")
         agent_executor = _get_agent_executor()
         
-        prompt, task_title = self._get_task_details(task_type, custom_prompt=custom_prompt)
+        prompt, task_title = task_registry.get_task_details(task_type, custom_prompt=custom_prompt)
         
         config = {
             "configurable": {
@@ -298,19 +263,6 @@ class ScheduledTaskService:
 
             # ── Read draft proposals directly from state ───────────────────
             drafts: list[dict] = result.get("drafts_proposed", [])
-            # ──────────────────────────────────────────────────────────────
-
-            # ── LLM cost logging ───────────────────────────────────────────
-            usage = getattr(last_msg, "usage_metadata", None)
-            if usage:
-                logger.info(
-                    "[LLM usage] user=%s task=scheduled_task "
-                    "input_tokens=%d output_tokens=%d total_tokens=%d",
-                    entry.user_id,
-                    usage.get("input_tokens", 0),
-                    usage.get("output_tokens", 0),
-                    usage.get("total_tokens", 0),
-                )
             # ──────────────────────────────────────────────────────────────
 
             if entry.user_id.startswith("telegram-") and self._telegram_service:
