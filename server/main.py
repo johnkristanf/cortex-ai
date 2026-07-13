@@ -64,6 +64,9 @@ async def chat_endpoint(request: ChatRequest):
             "google_access_token": request.google_access_token,
             "latitude": request.latitude,
             "longitude": request.longitude,
+            "user_id": request.user_id,
+            "file_name": request.file_name,
+            "file_base64": request.file_base64,
         },
         "tags": ["mobile", "cortex-ai"],
         "metadata": {
@@ -73,6 +76,9 @@ async def chat_endpoint(request: ChatRequest):
             "ls_model_name": "gpt-5.4-nano",
         },
     }
+
+    # Nodes that may produce an AIMessage directly (no LLM involved).
+    _DIRECT_MESSAGE_NODES = {"resume_upload", "find_jobs"}
 
     async def generate():
         try:
@@ -86,13 +92,24 @@ async def chat_endpoint(request: ChatRequest):
                     config,
                     version="v2",
                 ):
-                    kind = event["event"]
+                    event_type = event["event"]
 
                     # Stream LLM tokens as they arrive
-                    if kind == "on_chat_model_stream":
+                    if event_type == "on_chat_model_stream":
                         token = event["data"]["chunk"].content
                         if token:
                             yield sse_message({"text": token})
+
+                    # Stream AIMessages produced directly by non-LLM nodes
+                    elif event_type == "on_chain_end":
+                        node_name = event.get("name", "")
+                        if node_name in _DIRECT_MESSAGE_NODES:
+                            output = event["data"].get("output") or {}
+                            msgs = output.get("messages", [])
+                            for msg in msgs:
+                                content = getattr(msg, "content", None)
+                                if content:
+                                    yield sse_message({"text": content})
 
         except Exception as exc:
             logging.exception("Error in /chat endpoint")

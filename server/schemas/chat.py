@@ -6,3 +6,6 @@ class ChatRequest(BaseModel):
     google_access_token: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    user_id: str | None = None
+    file_name: str | None = None
+    file_base64: str | None = None

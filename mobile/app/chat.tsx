@@ -8,6 +8,8 @@ import { chatApi } from '../src/api/chat';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { getCachedCoords, refreshLocation } from '../src/lib/location';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 
 interface MessageDraft {
   to: string;
@@ -29,6 +31,7 @@ export default function ChatPage() {
     { id: '1', text: 'Hello! I am Cortex Ai. How can I help you today?', isUser: false }
   ]);
   const [inputText, setInputText] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const { google_token } = useLocalSearchParams<{ google_token?: string }>();
 
@@ -43,6 +46,9 @@ export default function ChatPage() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
+
+        // Store user ID for job application workflow
+        setUserId(user.id);
 
         // Always subscribe to scheduled tasks
 
@@ -109,6 +115,74 @@ export default function ChatPage() {
     }));
   };
 
+  const handleAttachment = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'text/plain', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const file = result.assets[0];
+        const base64 = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await sendFileMessage(file.name, base64);
+      }
+    } catch (err) {
+      console.error('Error picking document', err);
+    }
+  };
+
+  const sendFileMessage = async (fileName: string, fileBase64: string) => {
+    const userText = `[Attached File: ${fileName}]`;
+    const newUserMessage: Message = {
+      id: Date.now().toString(),
+      text: userText,
+      isUser: true,
+    };
+    setMessages(prev => [...prev, newUserMessage]);
+    
+    try {
+      const botMessageId = Date.now().toString() + '-bot';
+      const initialBotMessage: Message = {
+        id: botMessageId,
+        text: '',
+        isUser: false,
+      };
+      setMessages(prev => [...prev, initialBotMessage]);
+
+      const coords = getCachedCoords();
+      refreshLocation();
+
+      await chatApi.sendMessage(
+        userText,
+        'default',
+        google_token ?? null,
+        (textChunk) => {
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === botMessageId 
+                ? { ...msg, text: msg.text + textChunk }
+                : msg
+            )
+          );
+        },
+        coords,
+        userId,
+        fileName,
+        fileBase64
+      );
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        text: 'Error connecting to the assistant. Please try again.',
+        isUser: false,
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
   const sendMessage = async () => {
     if (!inputText.trim()) return;
 
@@ -149,6 +223,7 @@ export default function ChatPage() {
           );
         },
         coords,
+        userId,
       );
     } catch (error) {
       const errorMessage: Message = {
@@ -247,6 +322,9 @@ export default function ChatPage() {
 
         <View style={styles.inputContainer}>
           <View style={styles.inputWrapper}>
+            <TouchableOpacity style={styles.attachButton} onPress={handleAttachment}>
+              <Ionicons name="document-attach-outline" size={24} color="#64748B" />
+            </TouchableOpacity>
             <TextInput
               style={styles.input}
               placeholder="Type your message..."
@@ -375,6 +453,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
+  attachButton: {
+    padding: 8,
+    marginRight: 4,
+    marginBottom: 4,
+  },
   input: {
     flex: 1,
     maxHeight: 120,
@@ -466,7 +549,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const markdownStyles = {
+const markdownStyles: any = StyleSheet.create({
   body: {
     color: '#334155',
     fontSize: 16,
@@ -525,4 +608,4 @@ const markdownStyles = {
     color: '#334155',
     marginVertical: 8,
   },
-};
+});

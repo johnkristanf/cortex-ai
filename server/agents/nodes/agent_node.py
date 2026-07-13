@@ -9,12 +9,14 @@ prompt_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__fil
 with open(prompt_path, "r") as f:
     SYSTEM_PROMPT = f.read()
 
+model_name = os.environ.get("OPENAI_GP_MODEL", "gpt-4o-mini")
+
 llm = ChatOpenAI(
-    model="gpt-5.4-nano",
+    model=model_name,
     temperature=0,
     metadata={
         "ls_provider": "openai",
-        "ls_model_name": "gpt-5.4-nano"
+        "ls_model_name": model_name
     }
 )
 llm_with_tools = llm.bind_tools(TOOLS)

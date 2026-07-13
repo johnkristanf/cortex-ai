@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabasePublishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string;
 
 // Define a secure storage adapter. We use SecureStore for iOS/Android, and fall back to AsyncStorage for web or if SecureStore fails.
 const ExpoSecureStoreAdapter = {
@@ -22,7 +22,7 @@ const ExpoSecureStoreAdapter = {
 
 const storageAdapter = Platform.OS === 'web' ? AsyncStorage : ExpoSecureStoreAdapter;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   auth: {
     storage: storageAdapter as any,
     autoRefreshToken: true,

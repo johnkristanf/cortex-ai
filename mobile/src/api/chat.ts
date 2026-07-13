@@ -7,6 +7,9 @@ export const chatApi = {
     google_access_token: string | null = null,
     onProgress?: (textChunk: string) => void,
     coords?: { latitude: number; longitude: number } | null,
+    user_id?: string | null,
+    fileName?: string | null,
+    fileBase64?: string | null,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       // Use XMLHttpRequest for streaming support in React Native
@@ -63,6 +66,15 @@ export const chatApi = {
       if (coords) {
         body.latitude = coords.latitude;
         body.longitude = coords.longitude;
+      }
+      if (user_id) {
+        body.user_id = user_id;
+      }
+      if (fileName) {
+        body.file_name = fileName;
+      }
+      if (fileBase64) {
+        body.file_base64 = fileBase64;
       }
 
       xhr.send(JSON.stringify(body));

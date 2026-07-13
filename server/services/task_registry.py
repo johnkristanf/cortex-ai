@@ -3,7 +3,7 @@ import os
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Dict, Any, Tuple
+from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,6 @@ class TaskRegistry:
         else:
             task_info = self._tasks.get(task_type)
             if not task_info:
-                # Fallback if an unknown task is requested
                 prompt = custom_prompt or "Execute the scheduled task."
                 task_title = f"Scheduled Task ({task_type})"
                 return prompt, task_title
