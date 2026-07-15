@@ -8,25 +8,29 @@ from agents.state import AgentState
 logger = logging.getLogger(__name__)
 
 
-def _build_search_query(profile: dict) -> str:
-    target_role = profile.get("target_role") or "software engineer"
+def _build_search_query(profile: dict, preferences: dict | None = None) -> str:
+    target_role = (
+        (preferences or {}).get("target_roles") or []
+    )
+    # Prefer preferences target_roles over resume target_role
+    if target_role:
+        role_str = " OR ".join(f'"{r}"' for r in target_role)
+    else:
+        role_str = f'"{profile.get("target_role") or "software engineer"}"'
+
     skills: list = profile.get("skills") or []
-    top_skills = " ".join(skills[:4])
-    return f'"{target_role}" full-time job opening 2024 2025 {top_skills}'
+    top_skills = " ".join(skills[:3])
+
+    work = (preferences or {}).get("work_arrangement") or ""
+    location = (preferences or {}).get("location") or ""
+    salary = (preferences or {}).get("salary") or ""
+
+    extra = " ".join(filter(None, [work if work != "any" else "", location]))
+    return f"{role_str} job opening 2025 {top_skills} {extra}".strip()
 
 
 def _format_jobs(profile: dict, web_results: list) -> str:
-    target_role = profile.get("target_role", "your target role")
-    skills: list = profile.get("skills") or []
-    summary: str = profile.get("summary") or ""
-
-    output = f"## 🎯 Your Profile\n"
-    if summary:
-        output += f"{summary}\n\n"
-    output += f"**Target Role:** {target_role}\n"
-    if skills:
-        output += f"**Key Skills:** {', '.join(skills[:8])}\n"
-    output += "\n---\n\n## 💼 Job Matches\n\n"
+    output = "## 💼 Job Matches\n\n"
 
     for i, result in enumerate(web_results, 1):
         title = result.title or "Job Opening"
@@ -51,7 +55,8 @@ def find_jobs_node(state: AgentState) -> dict:
     return a formatted markdown list of job matches via Firecrawl.
     """
     profile: dict = state.get("resume_profile") or {}
-    query = _build_search_query(profile)
+    preferences: dict | None = state.get("job_preferences")
+    query = _build_search_query(profile, preferences)
     logger.info(f"find_jobs_node: searching with query: {query!r}")
 
     api_key = os.environ.get("FIRECRAWL_API_KEY")

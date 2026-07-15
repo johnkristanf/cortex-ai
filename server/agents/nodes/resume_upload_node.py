@@ -2,6 +2,7 @@ import base64
 import io
 import logging
 import pypdf
+import docx
 
 from langchain_core.messages import AIMessage, HumanMessage
 from agents.state import AgentState
@@ -11,9 +12,10 @@ from lib.supabase import get_supabase
 logger = logging.getLogger(__name__)
 
 _ASK_FOR_RESUME_MSG = (
-    "To help you find the best job matches, I need your resume. 📄\n\n"
-    "Please upload your resume file (PDF, TXT, DOCX) or paste it directly in the chat. "
-    "I'll analyze it and search for the most relevant opportunities for you!"
+    "Hello there! 👋 I'm excited to help you find your next great opportunity!\n\n"
+    "To get started and ensure I find the best matches tailored to your background, could you please share your resume? 📄\n\n"
+    "You can simply upload your file (PDF, DOCX, or TXT) or paste the text directly here in the chat. "
+    "Once I have it, I'll analyze your experience and start scouting for the perfect roles for you!"
 )
 
 
@@ -75,7 +77,6 @@ def resume_upload_node(state: AgentState, config) -> dict:
                 reader = pypdf.PdfReader(io.BytesIO(file_bytes))
                 resume_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             elif file_name.lower().endswith(".docx"):
-                import docx
                 doc = docx.Document(io.BytesIO(file_bytes))
                 resume_text = "\n".join([p.text for p in doc.paragraphs])
             else:

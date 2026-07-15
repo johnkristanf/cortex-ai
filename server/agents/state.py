@@ -18,6 +18,10 @@ class AgentState(TypedDict):
         resume_profile: Structured extraction of the user's resume
                         (summary, skills, experiences, education, target_role).
         resume_requested: True while we're waiting for the user to paste their resume.
+        job_preferences: Structured dict of the user's job search preferences
+                         (target_roles, work_arrangement, location, salary).
+        job_preferences_requested: True while we're waiting for the user to
+                                   supply their job search preferences.
         job_results: The last formatted job-listing markdown returned to chat.
         workflow: Name of the active subgraph workflow (e.g. "job_application").
     """
@@ -31,5 +35,7 @@ class AgentState(TypedDict):
     # Job Application workflow state
     resume_profile: dict | None
     resume_requested: bool
+    job_preferences: dict | None
+    job_preferences_requested: bool
     job_results: str | None
     workflow: str | None

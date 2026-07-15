@@ -23,7 +23,7 @@ def extract_resume_profile(resume_text: str) -> dict:
     with open(prompt_path, "r") as f:
         prompt_template = f.read()
     
-    prompt = prompt_template.format(resume_text=resume_text)
+    prompt = prompt_template.replace("{resume_text}", resume_text)
 
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
