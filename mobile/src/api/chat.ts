@@ -81,6 +81,61 @@ export const chatApi = {
     });
   },
 
+  sendResearchMessage(
+    message: string,
+    thread_id: string = "default",
+    onProgress?: (textChunk: string) => void,
+    onDownloadReady?: (downloadUrl: string) => void,
+  ): Promise<{ fullResponse: string; downloadUrl: string | null }> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${apiClient.defaults.baseURL}/researcher/chat`);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+
+      let fullResponse = '';
+      let processedLength = 0;
+      let downloadUrl: string | null = null;
+
+      xhr.onprogress = () => {
+        const newData = xhr.responseText.substring(processedLength);
+        processedLength = xhr.responseText.length;
+
+        const chunks = newData.split('\n\n');
+        for (const chunk of chunks) {
+          if (chunk.startsWith('data: ')) {
+            const dataStr = chunk.substring(6);
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.error) {
+                reject(new Error(data.error));
+              } else if (data.text) {
+                fullResponse += data.text;
+                if (onProgress) onProgress(data.text);
+              } else if (data.download_url) {
+                downloadUrl = `${apiClient.defaults.baseURL}${data.download_url}`;
+                if (onDownloadReady) onDownloadReady(downloadUrl);
+              }
+            } catch (e) {
+              // incomplete chunk, ignore
+            }
+          }
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve({ fullResponse, downloadUrl });
+        } else {
+          reject(new Error(`Request failed with status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error occurred'));
+
+      xhr.send(JSON.stringify({ message, thread_id }));
+    });
+  },
+
   async subscribeToScheduledTasks(
     user_id: string,
     thread_id: string = "default",

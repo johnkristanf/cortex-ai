@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +24,7 @@ interface Message {
   text: string;
   isUser: boolean;
   drafts?: MessageDraft[];
+  downloadUrl?: string;
 }
 
 export default function ChatPage() {
@@ -32,6 +33,7 @@ export default function ChatPage() {
   ]);
   const [inputText, setInputText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
+  const [researchMode, setResearchMode] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const { google_token } = useLocalSearchParams<{ google_token?: string }>();
 
@@ -196,35 +198,55 @@ export default function ChatPage() {
     setMessages(prev => [...prev, newUserMessage]);
     setInputText('');
 
+    const botMessageId = Date.now().toString() + '-bot';
+    const initialBotMessage: Message = { id: botMessageId, text: '', isUser: false };
+    setMessages(prev => [...prev, initialBotMessage]);
+
+    const coords = getCachedCoords();
+    refreshLocation();
+
     try {
-      // Create an empty bot message immediately
-      const botMessageId = Date.now().toString() + '-bot';
-      const initialBotMessage: Message = {
-        id: botMessageId,
-        text: '',
-        isUser: false,
-      };
-      setMessages(prev => [...prev, initialBotMessage]);
-
-      const coords = getCachedCoords();
-      refreshLocation();
-
-      await chatApi.sendMessage(
-        userText, 
-        'default', 
-        google_token ?? null,
-        (textChunk) => {
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === botMessageId 
-                ? { ...msg, text: msg.text + textChunk }
-                : msg
-            )
-          );
-        },
-        coords,
-        userId,
-      );
+      if (researchMode) {
+        // ── Product Researcher pipeline ───────────────────────────────
+        await chatApi.sendResearchMessage(
+          userText,
+          'default',
+          (textChunk) => {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === botMessageId
+                  ? { ...msg, text: msg.text + textChunk }
+                  : msg
+              )
+            );
+          },
+          (downloadUrl) => {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === botMessageId ? { ...msg, downloadUrl } : msg
+              )
+            );
+          },
+        );
+      } else {
+        // ── Default agent ─────────────────────────────────────────────
+        await chatApi.sendMessage(
+          userText,
+          'default',
+          google_token ?? null,
+          (textChunk) => {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === botMessageId
+                  ? { ...msg, text: msg.text + textChunk }
+                  : msg
+              )
+            );
+          },
+          coords,
+          userId,
+        );
+      }
     } catch (error) {
       const errorMessage: Message = {
         id: Date.now().toString(),
@@ -287,6 +309,15 @@ export default function ChatPage() {
                   ))}
                 </View>
               )}
+              {item.downloadUrl && (
+                <TouchableOpacity
+                  style={styles.downloadButton}
+                  onPress={() => Linking.openURL(item.downloadUrl!)}
+                >
+                  <Ionicons name="download-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.downloadButtonText}>Download Excel</Text>
+                </TouchableOpacity>
+              )}
             </>
           )}
         </View>
@@ -301,9 +332,25 @@ export default function ChatPage() {
           <Ionicons name="hardware-chip-outline" size={24} color="#3B82F6" />
           <Text style={styles.headerTitle}>Cortex Ai</Text>
         </View>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="settings-outline" size={24} color="#64748B" />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.researchToggle, researchMode && styles.researchToggleActive]}
+            onPress={() => setResearchMode(prev => !prev)}
+          >
+            <Ionicons
+              name="search-outline"
+              size={14}
+              color={researchMode ? '#FFFFFF' : '#64748B'}
+              style={{ marginRight: 4 }}
+            />
+            <Text style={[styles.researchToggleText, researchMode && styles.researchToggleTextActive]}>
+              Research
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerButton}>
+            <Ionicons name="settings-outline" size={24} color="#64748B" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <KeyboardAvoidingView 
@@ -546,6 +593,50 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
+  },
+  // ── Research mode toggle ─────────────────────────────────────────────────
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  researchToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+  },
+  researchToggleActive: {
+    backgroundColor: '#1E40AF',
+    borderColor: '#1E40AF',
+  },
+  researchToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  researchToggleTextActive: {
+    color: '#FFFFFF',
+  },
+  // ── Download button ──────────────────────────────────────────────────────
+  downloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#10B981',
+  },
+  downloadButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 

@@ -1,3 +1,4 @@
+import os
 import logging
 import asyncio
 logging.basicConfig(
@@ -11,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from telegram import Update, Bot
 from telegram.ext import Application
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from schemas.chat import ChatRequest
 from schemas.scheduled_tasks import ScheduledTaskSubscriptionRequest
 from schemas.email import SendEmailRequest
@@ -20,6 +21,7 @@ load_dotenv()
 
 
 from agents import agent_executor
+from agents.researcher import researcher_executor
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 import langsmith as ls
@@ -252,6 +254,94 @@ async def send_email_endpoint(request: SendEmailRequest):
     except Exception as e:
         # logger.error(f"Error sending email: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ------------------------------------------------------------------
+# Product Researcher Agent – SSE streaming endpoint
+# ------------------------------------------------------------------
+
+_RESEARCHER_STREAM_NODES = {"excel_builder"}
+
+@app.post("/researcher/chat")
+async def researcher_chat_endpoint(request: ChatRequest):
+    """
+    Streams the 4-node product researcher pipeline.
+    In addition to text chunks, emits a JSON SSE event with a `download_url`
+    once the Excel file is ready.
+    """
+    thread_id = request.thread_id or "default"
+
+    config = {
+        "configurable": {"thread_id": f"researcher-{thread_id}"},
+        "tags": ["researcher", "cortex-ai"],
+        "metadata": {
+            "thread_id": thread_id,
+            "source": "researcher_chat",
+        },
+    }
+
+    async def generate():
+        try:
+            async for event in researcher_executor.astream_events(
+                {"messages": [("user", request.message)]},
+                config,
+                version="v2",
+            ):
+                event_type = event["event"]
+
+                # Stream LLM tokens
+                if event_type == "on_chat_model_stream":
+                    token = event["data"]["chunk"].content
+                    if token:
+                        yield sse_message({"text": token})
+
+                # When excel_builder finishes, emit AIMessage text + download_url
+                elif event_type == "on_chain_end":
+                    node_name = event.get("name", "")
+                    if node_name in _RESEARCHER_STREAM_NODES:
+                        output = event["data"].get("output") or {}
+                        msgs = output.get("messages", [])
+                        for msg in msgs:
+                            content = getattr(msg, "content", None)
+                            if content:
+                                yield sse_message({"text": content})
+                        # Emit download_url if Excel was built
+                        filename = output.get("excel_filename")
+                        if filename and output.get("download_ready"):
+                            yield sse_message({"download_url": f"/researcher/download/{filename}"})
+
+        except Exception as exc:
+            logging.exception("Error in /researcher/chat endpoint")
+            yield sse_message({"error": str(exc)})
+
+        yield sse_message({"done": True})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/researcher/download/{filename}")
+async def researcher_download(filename: str):
+    """
+    Serves a generated Excel file from /tmp/.
+    The filename must end with .xlsx and contain only safe characters.
+    """
+    import re
+    if not re.match(r'^[\w\-]+\.xlsx$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    filepath = f"/tmp/{filename}"
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found or expired.")
+
+    return FileResponse(
+        path=filepath,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
+    )
+
 
 # ------------------------------------------------------------------
 # Server entry point
