@@ -177,89 +177,10 @@ async def scheduled_notifications(user_id: str, request: Request):
         },
     )
 
-# ------------------------------------------------------------------
-# Telegram Bot Webhook
-# ------------------------------------------------------------------
-
-@app.post("/telegram/webhook")
-async def telegram_webhook(request: Request):
-    """
-    Telegram Bot webhook endpoint.
-    Telegram calls this URL for every update. Each text message is forwarded
-    to the agent; the streamed response is collected and sent back to the chat.
-    """
-    data = await request.json()
-    update = Update.de_json(data, await telegram_service.get_bot())
-
-    # Only handle plain text messages
-    if not (update.message and update.message.text):
-        return {"ok": True}
-
-    chat_id = update.message.chat_id
-    user_text = update.message.text
-    thread_id = f"telegram-{chat_id}"
-
-    config = {
-        "configurable": {
-            "thread_id": thread_id,
-            "google_access_token": None,
-            "latitude": None,
-            "longitude": None,
-        },
-        "tags": ["telegram", "cortex-ai"],
-        "metadata": {
-            "thread_id": thread_id,
-            "source": "telegram_webhook",
-            "ls_provider": "openai",
-            "ls_model_name": "gpt-4o-mini",
-        },
-    }
-
-    reply_text = "I'm not sure how to respond to that."
-    try:
-        with ls.tracing_context(
-            project_name="cortex-ai",
-            tags=["telegram", "cortex-ai"],
-            metadata=config["metadata"],
-        ):
-            result = await agent_executor.ainvoke(
-                {"messages": [("user", user_text)]},
-                config,
-            )
-            # The last message in the list is the agent's final reply
-            last_msg = result["messages"][-1]
-            if hasattr(last_msg, "content") and last_msg.content:
-                reply_text = last_msg.content
-    except Exception as exc:
-        logging.exception("Error running agent for Telegram update")
-        reply_text = f"Sorry, something went wrong: {exc}"
-
-    await telegram_service.send_message(chat_id=chat_id, text=reply_text)
-
-    return {"ok": True}
-
-
-@app.post("/email/send")
-@ls.traceable(name="send_email")
-async def send_email_endpoint(request: SendEmailRequest):
-    try:
-        result = send_gmail_message(
-            google_access_token=request.google_access_token,
-            to=request.to,
-            subject=request.subject,
-            body=request.body,
-            gmail_thread_id=request.gmail_thread_id,
-        )
-        return result
-    except Exception as e:
-        # logger.error(f"Error sending email: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ------------------------------------------------------------------
 # Product Researcher Agent – SSE streaming endpoint
 # ------------------------------------------------------------------
-
-_RESEARCHER_STREAM_NODES = {"excel_builder"}
 
 @app.post("/researcher/chat")
 async def researcher_chat_endpoint(request: ChatRequest):
@@ -279,35 +200,42 @@ async def researcher_chat_endpoint(request: ChatRequest):
         },
     }
 
+    _RESEARCHER_STREAM_NODES = {"excel_builder"}
+
     async def generate():
         try:
-            async for event in researcher_executor.astream_events(
-                {"messages": [("user", request.message)]},
-                config,
-                version="v2",
+            with ls.tracing_context(
+                project_name="cortex-ai",
+                tags=["researcher", "cortex-ai"],
+                metadata=config["metadata"],
             ):
-                event_type = event["event"]
+                async for event in researcher_executor.astream_events(
+                    {"messages": [("user", request.message)]},
+                    config,
+                    version="v2",
+                ):
+                    event_type = event["event"]
 
-                # Stream LLM tokens
-                if event_type == "on_chat_model_stream":
-                    token = event["data"]["chunk"].content
-                    if token:
-                        yield sse_message({"text": token})
+                    # Stream LLM tokens
+                    if event_type == "on_chat_model_stream":
+                        token = event["data"]["chunk"].content
+                        if token:
+                            yield sse_message({"text": token})
 
-                # When excel_builder finishes, emit AIMessage text + download_url
-                elif event_type == "on_chain_end":
-                    node_name = event.get("name", "")
-                    if node_name in _RESEARCHER_STREAM_NODES:
-                        output = event["data"].get("output") or {}
-                        msgs = output.get("messages", [])
-                        for msg in msgs:
-                            content = getattr(msg, "content", None)
-                            if content:
-                                yield sse_message({"text": content})
-                        # Emit download_url if Excel was built
-                        filename = output.get("excel_filename")
-                        if filename and output.get("download_ready"):
-                            yield sse_message({"download_url": f"/researcher/download/{filename}"})
+                    # When excel_builder finishes, emit AIMessage text + download_url
+                    elif event_type == "on_chain_end":
+                        node_name = event.get("name", "")
+                        if node_name in _RESEARCHER_STREAM_NODES:
+                            output = event["data"].get("output") or {}
+                            msgs = output.get("messages", [])
+                            for msg in msgs:
+                                content = getattr(msg, "content", None)
+                                if content:
+                                    yield sse_message({"text": content})
+                            # Emit download_url if Excel was built
+                            filename = output.get("excel_filename")
+                            if filename and output.get("download_ready"):
+                                yield sse_message({"download_url": f"/researcher/download/{filename}"})
 
         except Exception as exc:
             logging.exception("Error in /researcher/chat endpoint")
@@ -320,6 +248,22 @@ async def researcher_chat_endpoint(request: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/email/send")
+@ls.traceable(name="send_email")
+async def send_email_endpoint(request: SendEmailRequest):
+    try:
+        result = send_gmail_message(
+            google_access_token=request.google_access_token,
+            to=request.to,
+            subject=request.subject,
+            body=request.body,
+            gmail_thread_id=request.gmail_thread_id,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/researcher/download/{filename}")

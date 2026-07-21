@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import asyncio
 import logging
 from langchain_openai import ChatOpenAI
@@ -11,19 +12,8 @@ model_name = os.environ.get("OPENAI_GP_MODEL", "gpt-4o-mini")
 
 _llm = ChatOpenAI(model=model_name, temperature=0)
 
-_EXTRACT_PROMPT = """You are a product data extractor.
-Given raw text scraped from a product webpage and the user's search query,
-extract ONE primary product that best matches the query.
-
-Return a JSON object ONLY (no markdown, no explanation) in this exact format:
-{{"name": "Product Name", "source": "https://exact-page-url.com", "price": "$X,XXX"}}
-
-Rules:
-- "name": The specific product model/name. Never generic names like "Product".
-- "source": Use the exact URL provided, do not invent URLs.
-- "price": The listed price. Use "N/A" if not found.
-- If no relevant product is found on the page, return: {{"name": null, "source": null, "price": null}}
-"""
+_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "playwright_node.md"
+_EXTRACT_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 
 async def _scrape_url(browser, url: str, query: str) -> dict | None:
@@ -36,13 +26,14 @@ async def _scrape_url(browser, url: str, query: str) -> dict | None:
         raw_text = (raw_text or "")[:4000].strip()
 
         if not raw_text:
+            logger.info(f"playwright_node: No visible text extracted from {url}")
             return None
 
         prompt_messages = [
             SystemMessage(content=_EXTRACT_PROMPT),
             HumanMessage(content=f"Search query: {query}\nPage URL: {url}\n\nPage text:\n{raw_text}"),
         ]
-        response = _llm.invoke(prompt_messages)
+        response = await _llm.ainvoke(prompt_messages)
         content = response.content.strip()
 
         import json
@@ -50,6 +41,7 @@ async def _scrape_url(browser, url: str, query: str) -> dict | None:
             product = json.loads(content)
             # Skip if LLM found nothing useful
             if not product.get("name"):
+                logger.info(f"playwright_node: LLM found no product on {url}. Response: {content}")
                 return None
             # Ensure source is set to the actual URL
             product["source"] = url

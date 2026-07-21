@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import logging
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage
@@ -10,11 +11,8 @@ model_name = os.environ.get("OPENAI_GP_MODEL", "gpt-4o-mini")
 
 _llm = ChatOpenAI(model=model_name, temperature=0)
 
-_SYSTEM_PROMPT = """You are a product research assistant.
-The user will describe the product or category they want to find.
-Extract the core search query — product name, category, or keywords — and confirm back to the user what you're searching for.
-Keep your reply short (1–2 sentences). Do NOT list products yet; that comes next.
-"""
+_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "agent_node.md"
+_SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def researcher_agent_node(state: ResearcherState) -> dict:
